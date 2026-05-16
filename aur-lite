@@ -1,0 +1,390 @@
+#!/bin/bash
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aur-lite"
+CONFIG_FILE="$CONFIG_DIR/repos.txt"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/aur-lite"
+
+mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
+touch "$CONFIG_FILE"
+
+usage() {
+    echo "Usage: $(basename "$0") <command> [arguments]"
+    echo ""
+    echo "Commands:"
+    echo "  search <query>            Search packages on AUR"
+    echo "  add <name> <url>          Add or update a repository in memory"
+    echo "  remove <name>             Remove a repository from memory"
+    echo "  uninstall <name>          Uninstall the software from the system"
+    echo "  list                      Show all saved repositories"
+    echo "  view <name>               Read the PKGBUILD of a saved package"
+    echo "  log <name>                Show commit history for downgrade purposes"
+    echo "  install [name[@commit]..] Clone and compile"
+    echo "  check                     Optimized update check"
+}
+
+get_installed_pkg() {
+    local base="$1"
+    
+    if pacman -Qq "$base" >/dev/null 2>&1; then
+        echo "$base"
+        return 0
+    fi
+    
+    local stripped
+    stripped=$(echo "$base" | sed -E 's/-(git|bin|svn|hg|bzr|cvs|nightly)$//')
+    
+    if [[ "$stripped" != "$base" ]] && pacman -Qq "$stripped" >/dev/null 2>&1; then
+        echo "$stripped"
+        return 0
+    fi
+    
+    return 1
+}
+
+search_aur() {
+    local query="$1"
+    if [[ -z "$query" ]]; then
+        echo "Error: Provide a search query."
+        exit 1
+    fi
+    echo "Searching for '$query' on AUR..."
+    echo "------------------------------------------------------------------------"
+    curl -s "https://aur.archlinux.org/rpc/v5/search/$query?by=name" | \
+        jq -r '.results | sort_by(.NumVotes) | reverse | .[] | "\u001b[1;32m\(.Name)\u001b[0m \(.Version) [Votes: \(.NumVotes)]\n   \u001b[3m\(.Description // "No description")\u001b[0m\n   \u001b[36mhttps://aur.archlinux.org/\(.Name).git\u001b[0m\n"'
+}
+
+add_repo() {
+    local name="$1"
+    local url="$2"
+    if [[ -z "$name" || -z "$url" ]]; then echo "Error: Provide alias and URL."; exit 1; fi
+
+    local existing_alias
+    existing_alias=$(awk -v u="$url" '$2==u {print $1}' "$CONFIG_FILE")
+    
+    if [[ -n "$existing_alias" ]]; then
+        if [[ "$existing_alias" == "$name" ]]; then
+            echo "Info: The repository is already tracked as '$name'."
+            exit 0
+        else
+            echo "Error: The repository '$url' is already tracked under the alias '$existing_alias'."
+            exit 1
+        fi
+    fi
+
+    if grep -q "^$name " "$CONFIG_FILE"; then
+        local old_url
+        old_url=$(awk -v r="$name" '$1==r {print $2}' "$CONFIG_FILE")
+        echo "Warning: Alias '$name' already exists and points to '$old_url'."
+        read -p "Do you want to overwrite it with the new URL? [y/N] " resp
+        if [[ "$resp" != "y" && "$resp" != "Y" ]]; then
+            echo "Operation canceled."
+            exit 0
+        fi
+    fi
+
+    sed -i "/^$name /d" "$CONFIG_FILE"
+    echo "$name $url" >> "$CONFIG_FILE"
+    echo "Saved: $name -> $url"
+}
+
+remove_repo() {
+    local alias_name="$1"
+    if [[ -z "$alias_name" ]]; then echo "Error: Provide the alias."; exit 1; fi
+    
+    local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
+    
+    if [[ -z "$url" ]]; then 
+        echo "Error: Alias '$alias_name' not found in memory."
+        exit 1
+    fi
+
+    local real_pkgname=$(basename "$url" .git)
+    local installed_name=$(get_installed_pkg "$real_pkgname")
+    
+    if [[ -n "$installed_name" ]]; then
+        echo "Cannot remove alias '$alias_name' from memory!"
+        echo "The software is still physically installed in the system under the name: '$installed_name'."
+        echo "To remove everything cleanly, use first: aur-lite uninstall $alias_name"
+        exit 1
+    fi
+
+    sed -i "/^$alias_name /d" "$CONFIG_FILE"
+    echo "Removed from memory: $alias_name"
+}
+
+uninstall_pkg() {
+    local alias_name="$1"
+    if [[ -z "$alias_name" ]]; then echo "Error: Provide the alias to uninstall."; exit 1; fi
+    
+    local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
+    local real_pkgname="$alias_name"
+    
+    if [[ -n "$url" ]]; then
+        real_pkgname=$(basename "$url" .git)
+    fi
+
+    local installed_name=$(get_installed_pkg "$real_pkgname")
+
+    if [[ -z "$installed_name" ]]; then
+        echo "Cannot proceed: The software associated with '$alias_name' is not installed."
+        exit 1
+    fi
+
+    echo "Uninstalling '$installed_name' (and orphaned dependencies)..."
+    sudo pacman -Rns --noconfirm "$installed_name"
+    
+    if ! pacman -Qq "$installed_name" >/dev/null 2>&1; then
+        echo "Uninstallation completed."
+        
+        if [[ -n "$url" ]]; then
+            echo ""
+            read -p "Do you also want to remove the repository '$alias_name' from your memory? [y/N] " resp
+            if [[ "$resp" == "y" || "$resp" == "Y" ]]; then
+                sed -i "/^$alias_name /d" "$CONFIG_FILE"
+                echo "Removed from memory: $alias_name"
+            fi
+        fi
+    else
+        echo "Operation canceled or failed."
+    fi
+}
+
+list_repos() {
+    if [[ ! -s "$CONFIG_FILE" ]]; then
+        echo "No repositories added."
+        return
+    fi
+
+    local output="ALIAS|REAL NAME|INSTALLED VERSION|REPO LINK\n"
+    output+="-----|---------|-----------------|---------\n"
+    local count=0
+
+    while read -r alias_name url; do
+        [[ -z "$alias_name" ]] && continue
+        count=$((count + 1))
+        
+        local real_pkgname=$(basename "$url" .git)
+        local installed_name=$(get_installed_pkg "$real_pkgname")
+        local installed_ver="Not-installed"
+        
+        if [[ -n "$installed_name" ]]; then
+            installed_ver=$(pacman -Q "$installed_name" 2>/dev/null | awk '{print $2}')
+        else
+            installed_name="N/A"
+        fi
+        
+        output+="${alias_name}|${installed_name}|${installed_ver}|${url}\n"
+    done < "$CONFIG_FILE"
+
+    if [[ $count -eq 0 ]]; then
+        echo "No repositories added."
+        return
+    fi
+
+    echo "Saved repositories:"
+    echo ""
+    echo -e "$output" | column -t -s '|'
+}
+
+view_pkgbuild() {
+    local alias_name="$1"
+    if [[ -z "$alias_name" ]]; then echo "Error: Provide the alias."; exit 1; fi
+    local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
+    if [[ -z "$url" ]]; then echo "Error: Alias not found."; exit 1; fi
+
+    local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-lite-view-XXXXXX)
+    if ! git clone -q "$url" "$temp_dir/repo_dir"; then
+        echo "Network error."; rm -rf "$temp_dir"; exit 1
+    fi
+    ${PAGER:-less} "$temp_dir/repo_dir/PKGBUILD"
+    rm -rf "$temp_dir"
+}
+
+log_repo() {
+    local alias_name="$1"
+    if [[ -z "$alias_name" ]]; then echo "Error: Provide the alias."; exit 1; fi
+    local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
+    if [[ -z "$url" ]]; then echo "Error: Alias not found."; exit 1; fi
+
+    local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-lite-log-XXXXXX)
+    cd "$temp_dir" || exit 1
+    if ! git clone -q "$url" repo_dir; then
+        echo "Network error."; cd - > /dev/null; rm -rf "$temp_dir"; exit 1
+    fi
+    cd repo_dir || exit 1
+
+    echo ""
+    printf "%-8s | %-15s | %s\n" "COMMIT" "VERSION" "COMMIT MESSAGE"
+    echo "------------------------------------------------------------------------"
+    git log --format="%h" -n 10 | while read -r hash; do
+        local pkgver=$(git show "${hash}:PKGBUILD" 2>/dev/null | grep -E '^pkgver=' | cut -d= -f2 | tr -d '"'\')
+        local pkgrel=$(git show "${hash}:PKGBUILD" 2>/dev/null | grep -E '^pkgrel=' | cut -d= -f2 | tr -d '"'\')
+        local commit_msg=$(git log -1 --format="%s" "$hash")
+        if [[ -n "$pkgver" ]]; then
+            printf "%-8s | %-15s | %s\n" "$hash" "${pkgver}-${pkgrel}" "$commit_msg"
+        else
+            printf "%-8s | %-15s | %s\n" "$hash" "Not available" "$commit_msg"
+        fi
+    done
+    cd - > /dev/null
+    rm -rf "$temp_dir"
+}
+
+install_repos() {
+    if [[ -f /var/lib/pacman/db.lck ]]; then
+        echo "Error: Pacman is locked (/var/lib/pacman/db.lck)."
+        exit 1
+    fi
+
+    local input_repos=("$@")
+    if [[ ${#input_repos[@]} -eq 0 ]]; then
+        mapfile -t input_repos < <(awk '{print $1}' "$CONFIG_FILE")
+    fi
+    if [[ ${#input_repos[@]} -eq 0 ]]; then echo "No repositories found."; exit 0; fi
+
+    for item in "${input_repos[@]}"; do
+        local alias_name="${item%@*}"
+        local commit=""
+        if [[ "$item" == *"@"* ]]; then commit="${item#*@}"; fi
+
+        local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
+        if [[ -z "$url" ]]; then echo "Error: '$alias_name' not found in memory."; continue; fi
+
+        echo ""
+        echo "=== Starting process for: $alias_name ==="
+        local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-lite-XXXXXX)
+        cd "$temp_dir" || continue
+
+        echo "Cloning $url into disk cache..."
+        if ! git clone "$url" repo_dir; then
+            echo "Error: 'git clone' failed."; cd - > /dev/null; rm -rf "$temp_dir"; continue
+        fi
+        cd repo_dir || continue
+
+        if [[ -n "$commit" ]]; then
+            if [[ "$url" =~ -(git|bin|svn|hg|bzr|nightly)\.git$ ]]; then
+                echo "WARNING: You are trying to install a specific commit (@$commit)"
+                echo "   of a non-standard package (e.g. -git or -bin)."
+                echo "   - VCS packages (-git) will still download the latest source code ignoring the commit."
+                echo "   - Binary packages (-bin) will fail if the old executable is no longer online."
+                echo ""
+                read -p "Do you want to continue anyway? [y/N] " downgrade_resp
+                if [[ "$downgrade_resp" != "y" && "$downgrade_resp" != "Y" ]]; then
+                    echo "Skipping $alias_name..."
+                    cd - > /dev/null
+                    rm -rf "$temp_dir"
+                    continue
+                fi
+            fi
+
+            echo "Checkout of version ($commit)..."
+            if ! git checkout "$commit"; then
+                echo "Error: Checkout failed."; cd - > /dev/null; rm -rf "$temp_dir"; continue
+            fi
+        fi
+
+        echo "Compiling and installing..."
+        local log_file="$temp_dir/makepkg.log"
+
+        set -o pipefail
+        LANG=C makepkg -si --noconfirm 2>&1 | tee "$log_file"
+        local makepkg_status=$?
+        set +o pipefail
+
+        if [[ $makepkg_status -ne 0 ]]; then
+            echo "Error: 'makepkg' failed."
+            local missing_deps=$(grep "target not found:" "$log_file" | awk -F': ' '{print $2}' | tr -d '\r')
+            if [[ -n "$missing_deps" ]]; then
+                echo ""
+                echo "Missing AUR dependencies to compile this package:"
+                for dep in $missing_deps; do
+                    echo "\u001b[1;32m$dep\u001b[0m -> \u001b[36mhttps://aur.archlinux.org/$dep.git\u001b[0m"
+                done
+            fi
+        else
+            echo "Success: Installation completed."
+        fi
+
+        echo "Cleaning cache for $alias_name..."
+        cd - > /dev/null
+        rm -rf "$temp_dir"
+    done
+
+    local orphans=$(pacman -Qtdq 2>/dev/null)
+    if [[ -n "$orphans" ]]; then
+        echo ""
+        echo "Found orphans: $(echo $orphans | tr '\n' ' ')"
+        read -p "Do you want to remove them from the system? [y/N] " resp
+        if [[ "$resp" == "y" || "$resp" == "Y" ]]; then
+            sudo pacman -Rns --noconfirm $(echo "$orphans")
+            echo "Cleanup completed."
+        fi
+    fi
+}
+
+check_updates() {
+    echo "Checking for updates (optimized)..."
+    local to_update=()
+    local has_updates=0
+    local pkgs=()
+
+    while read -r _ url; do
+        [[ -z "$url" ]] && continue
+        pkgs+=("$(basename "$url" .git)")
+    done < "$CONFIG_FILE"
+
+    if [[ ${#pkgs[@]} -eq 0 ]]; then echo "No packages saved in memory."; return; fi
+
+    local api_query=""
+    for pkg in "${pkgs[@]}"; do api_query+="arg[]=$pkg&"; done
+
+    local aur_json=$(curl -s "https://aur.archlinux.org/rpc/v5/info?$api_query")
+    local remote_data=$(echo "$aur_json" | jq -r '.results[] | "\(.Name)|\(.Version)"')
+
+    while read -r alias_name url; do
+        [[ -z "$alias_name" ]] && continue
+        local real_pkgname=$(basename "$url" .git)
+        local remote_ver=$(echo "$remote_data" | grep "^${real_pkgname}|" | cut -d'|' -f2)
+
+        if [[ -z "$remote_ver" ]]; then
+            echo "  [!] $alias_name: Not found on AUR servers."; continue
+        fi
+
+        local installed_name=$(get_installed_pkg "$real_pkgname")
+        
+        if [[ -z "$installed_name" ]]; then
+            echo "  [?] $alias_name: Currently not installed."; continue
+        fi
+
+        local installed_ver=$(pacman -Q "$installed_name" 2>/dev/null | awk '{print $2}')
+
+        if [[ $(vercmp "$installed_ver" "$remote_ver") -lt 0 ]]; then
+            echo "$alias_name ($installed_name): Update available ($installed_ver -> $remote_ver)"
+            to_update+=("$alias_name")
+            has_updates=1
+        else
+            echo "$alias_name: Up to date ($installed_ver)"
+        fi
+    done < "$CONFIG_FILE"
+
+    echo ""
+    if [[ $has_updates -eq 1 ]]; then
+        read -p "Do you want to install updates now? [y/N] " resp
+        if [[ "$resp" == "y" || "$resp" == "Y" ]]; then install_repos "${to_update[@]}"; fi
+    else
+        echo "All your software is up to date!"
+    fi
+}
+
+case "$1" in
+    search) shift; search_aur "$@" ;;
+    add) shift; add_repo "$@" ;;
+    remove) shift; remove_repo "$@" ;;
+    uninstall) shift; uninstall_pkg "$@" ;;
+    list) list_repos ;;
+    view) shift; view_pkgbuild "$@" ;;
+    log) shift; log_repo "$@" ;;
+    install) shift; install_repos "$@" ;;
+    check) check_updates ;;
+    *) usage ;;
+esac
