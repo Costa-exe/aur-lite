@@ -1,11 +1,11 @@
 PREFIX = /usr/local
 
 install:
-	install -Dm755 aur-lite $(DESTDIR)$(PREFIX)/bin/aur-lite
-	install -Dm644 aur-lite-completion.bash $(DESTDIR)/usr/share/bash-completion/completions/aur-lite
+	install -Dm755 aur-taw $(DESTDIR)$(PREFIX)/bin/aur-taw
+	install -Dm644 aur-taw-completion.bash $(DESTDIR)/usr/share/bash-completion/completions/aur-taw
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/aur-lite
-	rm -f $(DESTDIR)/usr/share/bash-completion/completions/aur-lite
+	rm -f $(DESTDIR)$(PREFIX)/bin/aur-taw
+	rm -f $(DESTDIR)/usr/share/bash-completion/completions/aur-taw
 
 .PHONY: install uninstall

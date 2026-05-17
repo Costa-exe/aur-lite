@@ -1,4 +1,4 @@
-_aur_lite_completions() {
+_aur_taw_completions() {
     local cur prev cmds repos config_file
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
@@ -6,7 +6,7 @@ _aur_lite_completions() {
 
     cmds="search add remove uninstall list view log install check"
 
-    config_file="${XDG_CONFIG_HOME:-$HOME/.config}/aur-lite/repos.txt"
+    config_file="${XDG_CONFIG_HOME:-$HOME/.config}/aur-taw/repos.txt"
     if [[ -f "$config_file" ]]; then
         repos=$(awk '{print $1}' "$config_file" 2>/dev/null)
     fi
@@ -27,4 +27,4 @@ _aur_lite_completions() {
     esac
 }
 
-complete -F _aur_lite_completions aur-lite
+complete -F _aur_taw_completions aur-taw

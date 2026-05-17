@@ -1,8 +1,8 @@
 #!/bin/bash
 
-CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aur-lite"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aur-taw"
 CONFIG_FILE="$CONFIG_DIR/repos.txt"
-CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/aur-lite"
+CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/aur-taw"
 
 mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
 touch "$CONFIG_FILE"
@@ -104,7 +104,7 @@ remove_repo() {
     if [[ -n "$installed_name" ]]; then
         echo "Cannot remove alias '$alias_name' from memory!"
         echo "The software is still physically installed in the system under the name: '$installed_name'."
-        echo "To remove everything cleanly, use first: aur-lite uninstall $alias_name"
+        echo "To remove everything cleanly, use first: aur-taw uninstall $alias_name"
         exit 1
     fi
 
@@ -192,7 +192,7 @@ view_pkgbuild() {
     local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
     if [[ -z "$url" ]]; then echo "Error: Alias not found."; exit 1; fi
 
-    local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-lite-view-XXXXXX)
+    local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-taw-view-XXXXXX)
     if ! git clone -q "$url" "$temp_dir/repo_dir"; then
         echo "Network error."; rm -rf "$temp_dir"; exit 1
     fi
@@ -206,7 +206,7 @@ log_repo() {
     local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
     if [[ -z "$url" ]]; then echo "Error: Alias not found."; exit 1; fi
 
-    local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-lite-log-XXXXXX)
+    local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-taw-log-XXXXXX)
     cd "$temp_dir" || exit 1
     if ! git clone -q "$url" repo_dir; then
         echo "Network error."; cd - > /dev/null; rm -rf "$temp_dir"; exit 1
@@ -252,7 +252,7 @@ install_repos() {
 
         echo ""
         echo "=== Starting process for: $alias_name ==="
-        local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-lite-XXXXXX)
+        local temp_dir=$(mktemp -d -p "$CACHE_DIR" aur-taw-XXXXXX)
         cd "$temp_dir" || continue
 
         echo "Cloning $url into disk cache..."
