@@ -4,9 +4,6 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aur-taw"
 CONFIG_FILE="$CONFIG_DIR/repos.txt"
 CACHE_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/aur-taw"
 
-mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
-touch "$CONFIG_FILE"
-
 usage() {
     echo "Usage: $(basename "$0") <command> [arguments]"
     echo ""
@@ -376,15 +373,22 @@ check_updates() {
     fi
 }
 
-case "$1" in
-    search) shift; search_aur "$@" ;;
-    add) shift; add_repo "$@" ;;
-    remove) shift; remove_repo "$@" ;;
-    uninstall) shift; uninstall_pkg "$@" ;;
-    list) list_repos ;;
-    view) shift; view_pkgbuild "$@" ;;
-    log) shift; log_repo "$@" ;;
-    install) shift; install_repos "$@" ;;
-    check) check_updates ;;
-    *) usage ;;
-esac
+main() {
+    mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
+    touch "$CONFIG_FILE"
+
+    case "$1" in
+        search) shift; search_aur "$@" ;;
+        add) shift; add_repo "$@" ;;
+        remove) shift; remove_repo "$@" ;;
+        uninstall) shift; uninstall_pkg "$@" ;;
+        list) list_repos ;;
+        view) shift; view_pkgbuild "$@" ;;
+        log) shift; log_repo "$@" ;;
+        install) shift; install_repos "$@" ;;
+        check) check_updates ;;
+        *) usage ;;
+    esac
+}
+
+main "$@"
