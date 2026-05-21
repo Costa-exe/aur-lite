@@ -374,8 +374,18 @@ check_updates() {
 }
 
 main() {
+    local is_first_run=0
+
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+        is_first_run=1
+    fi
+
     mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
     touch "$CONFIG_FILE"
+
+    f [[ $is_first_run -eq 1 ]]; then
+        echo "aur-taw https://aur.archlinux.org/aur-taw.git" >> "$CONFIG_FILE"
+    fi
 
     case "$1" in
         search) shift; search_aur "$@" ;;
