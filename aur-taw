@@ -17,7 +17,7 @@ usage() {
     echo "  log <name>                Show commit history for downgrade purposes"
     echo "  install [name[@commit]..] Clone and compile"
     echo "  check                     Optimized update check"
-    echo "  import                    Import already installed AUR packages"
+    echo "  import [--all]            Import already installed AUR packages"
 }
 
 get_installed_pkg() {
@@ -401,6 +401,11 @@ check_updates() {
 }
 
 import_repos() {
+    local import_all=0
+    if [[ "$1" == "--all" ]]; then
+        import_all=1
+    fi
+
     echo "Searching for already installed AUR packages..."
     
     local foreign_pkgs=($(pacman -Qmq 2>/dev/null))
@@ -434,11 +439,17 @@ import_repos() {
             continue
         fi
         
-        read -p "Do you want to track '$pkg' in aur-taw? [y/N] " resp
-        if [[ "$resp" == "y" || "$resp" == "Y" ]]; then
+        if [[ $import_all -eq 1 ]]; then
             echo "$pkg https://aur.archlinux.org/$pkg.git" >> "$CONFIG_FILE"
-            echo "  -> Added to memory: $pkg"
+            echo "  -> Auto-added to memory: $pkg"
             ((added_count++))
+        else
+            read -p "Do you want to track '$pkg' in aur-taw? [y/N] " resp
+            if [[ "$resp" == "y" || "$resp" == "Y" ]]; then
+                echo "$pkg https://aur.archlinux.org/$pkg.git" >> "$CONFIG_FILE"
+                echo "  -> Added to memory: $pkg"
+                ((added_count++))
+            fi
         fi
     done
 
@@ -474,7 +485,7 @@ main() {
         log) shift; log_repo "$@" ;;
         install) shift; install_repos "$@" ;;
         check) check_updates ;;
-        import) import_repos ;;
+        import) shift; import_repos "$@" ;;
         *) usage ;;
     esac
 }
