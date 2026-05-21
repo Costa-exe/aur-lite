@@ -7,13 +7,14 @@ Unlike traditional AUR helpers that take over your entire system and blindly sca
 ## Table of Contents
 * [Key Features & Security Measures](#key-features--security-measures)
 * [Dependencies](#dependencies)
-* [Installation](#installation)
+* [Installation (AUR Method)](#installation-aur-method)
+  * [The Auto-Bootstrap](#the-auto-bootstrap)
   * [Enable Autocompletion](#enable-autocompletion)
-  * [Uninstallation](#uninstallation)
 * [Sudo Password Mitigation](#sudo-password-mitigation)
 * [Usage Guide & Commands](#usage-guide--commands)
   * [Search](#search)
   * [Add / Update](#add--update)
+  * [Import (Already Installed)](#import-already-installed)
   * [List](#list)
   * [Install](#install)
   * [Check Updates](#check-updates)
@@ -28,9 +29,11 @@ Unlike traditional AUR helpers that take over your entire system and blindly sca
 
 * **KISS Compliant**: No Go, no Rust, no background magic. Just standard Bash.
 * **RAM-Safe Builds**: Large AUR packages (like browsers or electron apps) can easily crash your system if compiled in `tmpfs` (RAM). `aur-taw` clones and builds everything on your physical disk (`~/.cache/aur-taw`), keeping your memory free and your system stable.
+* **Self-Updating**: `aur-taw` automatically tracks itself upon first run, allowing it to update itself through the standard update checking process.
+* **Smart Import**: Easily migrate from other helpers by scanning your system for installed AUR packages and interactively choosing which ones to track.
 * **Smart Safeguards**:
   * **Pacman Lock Check**: Verifies `/var/lib/pacman/db.lck` before starting any operation.
-  * **Removal Blocker**: Prevents you from untracking an alias using `remove` if the software is still physically installed on your system.
+  * **Removal Blocker**: Prevents you from untracking an alias using `remove` if the software is still physically installed on your system. It also strictly protects the `aur-taw` alias from accidental removal.
   * **VCS/Bin Alerts**: Warns you if you attempt to downgrade a non-standard package where specific commits might be ignored or missing.
 * **Time Machine (Downgrades)**: Easily install a specific version of a package by appending a git commit hash.
 * **Clean Workflow**: Automatically detects missing AUR dependencies, provides links to add them, and prompts you to remove build orphans once the installation is done.
@@ -40,31 +43,30 @@ Unlike traditional AUR helpers that take over your entire system and blindly sca
 
 Ensure you have the required base tools installed on your Arch system:
 
-    sudo pacman -S base-devel git curl jq less
+    sudo pacman -S --needed base-devel git curl jq less
 
 *(Note: `base-devel` provides `makepkg`, which is mandatory for building AUR packages. `less` is used to safely view `PKGBUILD` files).*
 
-## Installation
+## Installation (AUR Method)
 
-The recommended way to install `aur-taw` is via the provided `Makefile`. This will place the script in `/usr/local/bin` (making it executable from anywhere in your terminal) and configure the bash autocompletion.
+`aur-taw` is designed to be installed the standard "Arch Way" using `makepkg`.
 
-    git clone https://github.com/Costa-exe/aur-taw.git
+1. Clone the repository from the AUR:
+    git clone https://aur.archlinux.org/aur-taw.git
+
+2. Navigate into the directory and build/install the package:
     cd aur-taw
-    sudo make install
+    makepkg -si
 
+3. You can now safely delete the cloned directory, as `aur-taw` is installed on your system.
+
+### The Auto-Bootstrap
+The first time you run any `aur-taw` command (e.g., `aur-taw check`), the tool will initialize its configuration files in `~/.config/aur-taw/` and **automatically add itself to the tracking list**. From that moment on, `aur-taw` will check for its own updates and self-upgrade just like any other tracked package!
 
 ### Enable Autocompletion
-To make the `TAB` autocompletion work immediately without rebooting your terminal, run:
+The installation automatically places the completion script in the correct system directory. To make the `TAB` autocompletion work immediately without rebooting your terminal, simply close and reopen your terminal, or run:
 
     source /usr/share/bash-completion/completions/aur-taw
-
-*(Alternatively, just close and reopen your terminal).*
-
-### Uninstallation
-If you ever want to remove `aur-taw` from your system:
-
-    sudo make uninstall
-
 
 ## Sudo Password Mitigation
 
@@ -94,13 +96,13 @@ Search for a package by its exact name on the AUR.
     # Example: aur-taw search spotify
 
 **Example Output:**
-```text
-Searching for 'spotify' on AUR...
-------------------------------------------------------------------------
-spotify 1.2.37.701-1 [Votes: 4500]
-   A proprietary music streaming service
-   https://aur.archlinux.org/spotify.git
-```
+
+    Searching for 'spotify' on AUR...
+    ------------------------------------------------------------------------
+    spotify 1.2.37.701-1 [Votes: 4500]
+       A proprietary music streaming service
+       https://aur.archlinux.org/spotify.git
+
 
 ### Add / Update
 Add a repository to your tracking list using a custom alias. If the alias already exists, it updates the URL.
@@ -108,6 +110,14 @@ Add a repository to your tracking list using a custom alias. If the alias alread
     aur-taw add <alias> <git-url>
     # Example: aur-taw add music-player https://aur.archlinux.org/spotify.git
 
+### Import (Already Installed)
+Scan your system for foreign packages and query the AUR to see which ones are valid. You will be prompted `[y/N]` for each package, allowing you to selectively add them to your tracking memory.
+
+    aur-taw import
+
+If you want to skip the prompts and instantly add all valid installed AUR packages to your tracking list, use the `--all` flag:
+
+    aur-taw import --all
 
 ### List
 Show a beautifully formatted table of all tracked aliases, their real package names, installed versions, and repository links.
@@ -115,14 +125,15 @@ Show a beautifully formatted table of all tracked aliases, their real package na
     aur-taw list
 
 **Example Output:**
-```text
-Saved repositories:
 
-ALIAS         REAL NAME  INSTALLED VERSION  REPO LINK
------         ---------  -----------------  ---------
-music-player  spotify    1.2.37.701-1       https://aur.archlinux.org/spotify.git
-my-bonsai     cbonsai    Not-installed      https://aur.archlinux.org/cbonsai-git.git
-```
+    Saved repositories:
+
+    ALIAS         REAL NAME  INSTALLED VERSION  REPO LINK
+    -----         ---------  -----------------  ---------
+    aur-taw       aur-taw    1.0.0-1            https://aur.archlinux.org/aur-taw.git
+    music-player  spotify    1.2.37.701-1       https://aur.archlinux.org/spotify.git
+    my-bonsai     cbonsai    Not-installed      https://aur.archlinux.org/cbonsai-git.git
+
 
 ### Install
 Clone, compile, and install packages. You can specify one or multiple aliases. If no alias is provided, it processes **all** tracked packages.
@@ -144,13 +155,14 @@ Perform a blazing-fast bulk API call to check if any of your tracked packages ha
     aur-taw check
 
 **Example Output:**
-```text
-Checking for updates (optimized)...
-  music-player: Up to date (1.2.37.701-1)
-  my-bonsai (cbonsai): Update available (Not-installed -> 1.4.2-1)
 
-Do you want to install updates now? [y/N]
-```
+    Checking for updates (optimized)...
+      aur-taw: Up to date (1.0.0-1)
+      music-player: Up to date (1.2.37.701-1)
+      my-bonsai (cbonsai): Update available (Not-installed -> 1.4.2-1)
+
+    Do you want to install updates now? [y/N]
+
 
 ### View PKGBUILD
 Download and inspect the `PKGBUILD` of a tracked package using `less` before deciding to install it.
@@ -158,16 +170,16 @@ Download and inspect the `PKGBUILD` of a tracked package using `less` before dec
     aur-taw view music-player
 
 **Example Output:**
-```text
-# Maintainer: John Doe <john@example.com>
-pkgname=spotify
-pkgver=1.2.37.701
-pkgrel=1
-pkgdesc="A proprietary music streaming service"
-arch=('x86_64')
-...
-(END)
-```
+
+    # Maintainer: John Doe <john@example.com>
+    pkgname=spotify
+    pkgver=1.2.37.701
+    pkgrel=1
+    pkgdesc="A proprietary music streaming service"
+    arch=('x86_64')
+    ...
+    (END)
+
 
 ### Log (Git History)
 View the last 10 commits of a package, including their hashes, exact version numbers, and commit messages. Extremely useful for finding the right hash for a downgrade.
@@ -175,17 +187,17 @@ View the last 10 commits of a package, including their hashes, exact version num
     aur-taw log music-player
 
 **Example Output:**
-```text
-COMMIT   | VERSION         | COMMIT MESSAGE
-------------------------------------------------------------------------
-a1b2c3d  | 1.2.37.701-1    | Update to version 1.2.37.701
-f9e8d7c  | 1.2.31.1205-2   | Fix missing dependency
-b4a5d6e  | 1.2.31.1205-1   | Update to version 1.2.31.1205
-```
+
+    COMMIT   | VERSION         | COMMIT MESSAGE
+    ------------------------------------------------------------------------
+    a1b2c3d  | 1.2.37.701-1    | Update to version 1.2.37.701
+    f9e8d7c  | 1.2.31.1205-2   | Fix missing dependency
+    b4a5d6e  | 1.2.31.1205-1   | Update to version 1.2.31.1205
+
 
 ### Remove (From Memory)
 Remove an alias from your `repos.txt` tracking list. 
-*Note: This command will be blocked if the software is still installed on your system, preventing untracked "orphan" software.*
+*Note: This command will be blocked if the software is still installed on your system, preventing untracked "orphan" software. The `aur-taw` alias itself is strictly protected and cannot be removed.*
 
     aur-taw remove music-player
 
@@ -195,6 +207,7 @@ The proper way to remove software. It uninstalls the package and its unused depe
 
     aur-taw uninstall music-player
 
+**Self-Destruct & Cleanup:** If you use this command to uninstall the helper itself (`aur-taw uninstall aur-taw`), you will be presented with a security warning. If you proceed, the script will completely purge itself, its configuration folder, and its cache from your system, leaving no trace behind while keeping your other AUR packages safely installed.
 
 
 ## License
