@@ -17,6 +17,7 @@ usage() {
     echo "  log <name>                Show commit history for downgrade purposes"
     echo "  install [name[@commit]..] Clone and compile"
     echo "  check                     Optimized update check"
+    echo "  import                    Import already installed AUR packages"
 }
 
 get_installed_pkg() {
@@ -373,6 +374,56 @@ check_updates() {
     fi
 }
 
+import_repos() {
+    echo "Searching for already installed AUR packages..."
+    
+    local foreign_pkgs=($(pacman -Qmq 2>/dev/null))
+    
+    if [[ ${#foreign_pkgs[@]} -eq 0 ]]; then
+        echo "No foreign packages found on the system."
+        return
+    fi
+
+    echo "Found ${#foreign_pkgs[@]} foreign packages. Verifying presence on AUR servers..."
+
+    local api_query=""
+    for pkg in "${foreign_pkgs[@]}"; do 
+        api_query+="arg[]=$pkg&"
+    done
+
+    local aur_json=$(curl -s "https://aur.archlinux.org/rpc/v5/info?$api_query")
+    local valid_aur_pkgs=($(echo "$aur_json" | jq -r '.results[].Name'))
+
+    if [[ ${#valid_aur_pkgs[@]} -eq 0 ]]; then
+        echo "None of the installed foreign packages are from AUR."
+        return
+    fi
+
+    echo ""
+    echo "The following installed packages were found on AUR:"
+    
+    local added_count=0
+    for pkg in "${valid_aur_pkgs[@]}"; do
+        if grep -q "^$pkg " "$CONFIG_FILE"; then
+            continue
+        fi
+        
+        read -p "Do you want to track '$pkg' in aur-taw? [y/N] " resp
+        if [[ "$resp" == "y" || "$resp" == "Y" ]]; then
+            echo "$pkg https://aur.archlinux.org/$pkg.git" >> "$CONFIG_FILE"
+            echo "  -> Added to memory: $pkg"
+            ((added_count++))
+        fi
+    done
+
+    echo ""
+    if [[ $added_count -gt 0 ]]; then
+        echo "Import completed: $added_count new repositories added."
+    else
+        echo "No new repositories added."
+    fi
+}
+
 main() {
     local is_first_run=0
 
@@ -397,6 +448,7 @@ main() {
         log) shift; log_repo "$@" ;;
         install) shift; install_repos "$@" ;;
         check) check_updates ;;
+        import) import_repos ;;
         *) usage ;;
     esac
 }
