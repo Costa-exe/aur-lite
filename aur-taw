@@ -88,6 +88,11 @@ add_repo() {
 remove_repo() {
     local alias_name="$1"
     if [[ -z "$alias_name" ]]; then echo "Error: Provide the alias."; exit 1; fi
+
+    if [[ "$alias_name" == "aur-taw" ]]; then
+        echo "Error: The 'aur-taw' repository is essential for self-updates and cannot be removed from memory."
+        exit 1
+    fi
     
     local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
     
@@ -128,11 +133,32 @@ uninstall_pkg() {
         exit 1
     fi
 
+    if [[ "$installed_name" == "aur-taw" ]]; then
+        echo ""
+        echo "WARNING: You are about to completely uninstall aur-taw from your system!"
+        echo "This will remove aur-taw, its configuration files, and cache."
+        echo "However, the individual AUR packages you have installed will NOT be removed."
+        echo "If you choose to proceed, aur-taw can only be used again after a fresh installation."
+        echo ""
+        read -p "Are you absolutely sure you want to proceed? [y/N] " confirm_suicide
+        if [[ "$confirm_suicide" != "y" && "$confirm_suicide" != "Y" ]]; then
+            echo "Operation canceled."
+            exit 0
+        fi
+    fi
+
     echo "Uninstalling '$installed_name' (and orphaned dependencies)..."
     sudo pacman -Rns --noconfirm "$installed_name"
     
     if ! pacman -Qq "$installed_name" >/dev/null 2>&1; then
         echo "Uninstallation completed."
+
+        if [[ "$installed_name" == "aur-taw" ]]; then
+            echo "Cleaning up aur-taw files and cache..."
+            rm -rf "$CONFIG_DIR" "$CACHE_DIR"
+            echo "Total cleanup completed. Goodbye!"
+            exit 0
+        fi
         
         if [[ -n "$url" ]]; then
             echo ""
