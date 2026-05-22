@@ -471,7 +471,7 @@ main() {
     mkdir -p "$CONFIG_DIR" "$CACHE_DIR"
     touch "$CONFIG_FILE"
 
-    f [[ $is_first_run -eq 1 ]]; then
+    if [[ $is_first_run -eq 1 ]]; then
         echo "aur-taw https://aur.archlinux.org/aur-taw.git" >> "$CONFIG_FILE"
     fi
 
