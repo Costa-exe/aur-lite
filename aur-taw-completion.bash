@@ -4,7 +4,7 @@ _aur_taw_completions() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    cmds="search add remove uninstall list view log install check"
+    cmds="search add import remove uninstall list view log install check"
 
     config_file="${XDG_CONFIG_HOME:-$HOME/.config}/aur-taw/repos.txt"
     if [[ -f "$config_file" ]]; then
@@ -19,6 +19,10 @@ _aur_taw_completions() {
     case "${prev}" in
         install|remove|uninstall|view|log)
             COMPREPLY=( $(compgen -W "${repos}" -- "${cur}") )
+            return 0
+            ;;
+        import)
+            COMPREPLY=( $(compgen -W "--all" -- "${cur}") )
             return 0
             ;;
         *)
