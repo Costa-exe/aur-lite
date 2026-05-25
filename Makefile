@@ -1,4 +1,4 @@
-VERSION ?= 1.2.0-dev
+VERSION ?= v1.2.0-dev
 PREFIX = /usr/local
 
 install:

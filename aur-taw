@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="1.2.0"
+VERSION="v1.2.0"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aur-taw"
 CONFIG_FILE="$CONFIG_DIR/repos.txt"
@@ -216,7 +216,7 @@ list_repos() {
         if [[ -n "$installed_name" ]]; then
             installed_ver=$(pacman -Q "$installed_name" 2>/dev/null | awk '{print $2}')
         else
-            installed_name="N/A"
+            installed_name="$real_pkgname"
         fi
         
         output+="${alias_name}|${installed_name}|${installed_ver}|${url}\n"
