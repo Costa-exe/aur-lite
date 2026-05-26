@@ -10,16 +10,16 @@ usage() {
     echo "Usage: $(basename "$0") <command> [arguments]"
     echo ""
     echo "Commands:"
-    echo "  search <query>            Search packages on AUR"
-    echo "  add <name> <url>          Add or update a repository in memory"
-    echo "  remove <name>             Remove a repository from memory"
-    echo "  uninstall <name>          Uninstall the software from the system"
-    echo "  list                      Show all saved repositories"
-    echo "  view <name>               Read the PKGBUILD of a saved package"
-    echo "  log <name>                Show commit history for downgrade purposes"
-    echo "  install [name[@commit]..] Clone and compile"
-    echo "  check                     Optimized update check"
-    echo "  import [--all]            Import already installed AUR packages"
+    echo "  search <query>                  Search packages on AUR"
+    echo "  add <name> <url>                Add or update a repository in memory"
+    echo "  remove <name>                   Remove a repository from memory"
+    echo "  uninstall <name>                Uninstall the software from the system"
+    echo "  list                            Show all saved repositories and versions"
+    echo "  view <name>                     Read the PKGBUILD of a saved package"
+    echo "  log <name>                      Show commit history for downgrade purposes"
+    echo "  install [name|--all] [--upgrade] Clone, compile and optionally upgrade"
+    echo "  check                           Check for updates and refresh version data"
+    echo "  import [--all]                  Import already installed AUR packages"
 }
 
 get_installed_pkg() {
@@ -83,7 +83,17 @@ add_repo() {
     fi
 
     sed -i "/^$name /d" "$CONFIG_FILE"
-    echo "$name $url" >> "$CONFIG_FILE"
+    
+    # Cerca di capire se il pacchetto che stiamo aggiungendo è già installato
+    local real_pkgname=$(basename "$url" .git)
+    local installed_name=$(get_installed_pkg "$real_pkgname")
+    local initial_ver="Unknown"
+    
+    if [[ -n "$installed_name" ]]; then
+        initial_ver=$(pacman -Q "$installed_name" 2>/dev/null | awk '{print $2}')
+    fi
+
+    echo "$name $url $initial_ver" >> "$CONFIG_FILE"
     echo "Saved: $name -> $url"
 }
 
@@ -196,16 +206,20 @@ list_repos() {
         return
     fi
 
-    local output="ALIAS|REAL NAME|INSTALLED VERSION|REPO LINK\n"
-    output+="-----|---------|-----------------|---------\n"
+    local output="ALIAS|REAL NAME|INSTALLED VERSION|LATEST AUR|REPO LINK\n"
+    output+="-----|---------|-----------------|----------|---------\n"
     local count=0
 
-    while read -r alias_name url; do
+    while read -r alias_name url latest_ver; do
         [[ -z "$alias_name" ]] && continue
         count=$((count + 1))
         
+        if [[ -z "$latest_ver" ]]; then
+            latest_ver="Unknown"
+        fi
+
         if [[ "$alias_name" == "aur-taw" && "$VERSION" == *"-dev"* ]]; then
-            output+="${alias_name}|aur-taw|${VERSION} (Dev Build)|${url}\n"
+            output+="${alias_name}|aur-taw|${VERSION} (Dev Build)|${latest_ver}|${url}\n"
             continue
         fi
 
@@ -219,7 +233,7 @@ list_repos() {
             installed_name="$real_pkgname"
         fi
         
-        output+="${alias_name}|${installed_name}|${installed_ver}|${url}\n"
+        output+="${alias_name}|${installed_name}|${installed_ver}|${latest_ver}|${url}\n"
     done < "$CONFIG_FILE"
 
     if [[ $count -eq 0 ]]; then
@@ -228,6 +242,7 @@ list_repos() {
     fi
 
     echo "Saved repositories:"
+    echo "  (Run 'aur-taw check' to refresh the LATEST AUR column)"
     echo ""
     echo -e "$output" | column -t -s '|'
 }
@@ -282,24 +297,110 @@ install_repos() {
         exit 1
     fi
 
-    local input_repos=("$@")
-    if [[ ${#input_repos[@]} -eq 0 ]]; then
+    local is_upgrade=0
+    local is_all=0
+    local input_repos=()
+
+    for arg in "$@"; do
+        if [[ "$arg" == "--upgrade" ]]; then
+            is_upgrade=1
+        elif [[ "$arg" == "--all" ]]; then
+            is_all=1
+        else
+            input_repos+=("$arg")
+        fi
+    done
+
+    if [[ $is_all -eq 1 ]]; then
         mapfile -t input_repos < <(awk '{print $1}' "$CONFIG_FILE")
     fi
-    if [[ ${#input_repos[@]} -eq 0 ]]; then echo "No repositories found."; exit 0; fi
 
+    if [[ ${#input_repos[@]} -eq 0 ]]; then 
+        echo "Error: Provide an alias to install, or use --all."
+        exit 1
+    fi
+
+    echo "Analyzing packages..."
+    local filtered_repos=()
+    
     for item in "${input_repos[@]}"; do
         local alias_name="${item%@*}"
         local commit=""
         if [[ "$item" == *"@"* ]]; then commit="${item#*@}"; fi
 
+        # Filtro per la Dev Build: BLOCCA SUBITO aur-taw PRIMA dei prompt
         if [[ "$alias_name" == "aur-taw" && "$VERSION" == *"-dev"* ]]; then
-            echo ""
-            echo "=== Skipping: $alias_name ==="
-            echo "[!] You are running a development build ($VERSION)."
-            echo "    Cannot install or overwrite via standard AUR installation."
+            echo "  [!] $alias_name: Skipped (Running dev build $VERSION)."
             continue
         fi
+
+        local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
+        local latest_ver=$(awk -v r="$alias_name" '$1==r {print $3}' "$CONFIG_FILE")
+        
+        if [[ -z "$url" ]]; then continue; fi
+
+        local real_pkgname=$(basename "$url" .git)
+        local installed_name=$(get_installed_pkg "$real_pkgname")
+        
+        # Filtro intelligenza installazione
+        if [[ -n "$installed_name" ]]; then
+            # Se è già installato
+            if [[ -n "$commit" ]]; then
+                # L'utente ha chiesto un commit specifico (downgrade/checkout), procedi.
+                filtered_repos+=("$item")
+            elif [[ $is_upgrade -eq 1 ]]; then
+                # L'utente ha chiesto l'upgrade, controlliamo la versione
+                if [[ "$latest_ver" == "Unknown" || -z "$latest_ver" ]]; then
+                    echo "  [?] $alias_name: Unknown remote version. Run 'aur-taw check' first."
+                    continue
+                fi
+                local installed_ver=$(pacman -Q "$installed_name" 2>/dev/null | awk '{print $2}')
+                
+                if [[ $(vercmp "$installed_ver" "$latest_ver") -lt 0 ]]; then
+                    filtered_repos+=("$item")
+                else
+                    echo "  [i] $alias_name: Already up to date ($installed_ver)."
+                fi
+            else
+                # È già installato, nessun commit specifico e nessun --upgrade richiesto. Salta.
+                echo "  [i] $alias_name: Already installed. (Pass --upgrade to update it)"
+            fi
+        else
+            # Non è installato, deve essere installato per forza
+            filtered_repos+=("$item")
+        fi
+    done
+
+    input_repos=("${filtered_repos[@]}")
+    
+    if [[ ${#input_repos[@]} -eq 0 ]]; then
+        echo "Nothing to do."
+        exit 0
+    fi
+
+    local makepkg_flags="-si"
+    if [[ $is_all -eq 1 ]]; then
+        echo ""
+        echo "The following packages will be processed: ${input_repos[*]}"
+        echo "WARNING: You are about to mass-process multiple packages."
+        echo "This procedure will automatically resolve and install packages and dependencies"
+        echo "without asking for further confirmation."
+        echo ""
+        read -p "Do you want to proceed? [y/N] " resp
+        if [[ "$resp" != "y" && "$resp" != "Y" ]]; then
+            echo "Operation canceled."
+            exit 0
+        fi
+        makepkg_flags="-si --noconfirm"
+    else
+        echo ""
+        echo "The following packages will be processed: ${input_repos[*]}"
+    fi
+
+    for item in "${input_repos[@]}"; do
+        local alias_name="${item%@*}"
+        local commit=""
+        if [[ "$item" == *"@"* ]]; then commit="${item#*@}"; fi
 
         local url=$(awk -v r="$alias_name" '$1==r {print $2}' "$CONFIG_FILE")
         if [[ -z "$url" ]]; then echo "Error: '$alias_name' not found in memory."; continue; fi
@@ -341,8 +442,7 @@ install_repos() {
         local log_file="$temp_dir/makepkg.log"
 
         set -o pipefail
-        # RIMOSSO --noconfirm da makepkg: ora Pacman chiederà conferma per l'installazione
-        LANG=C makepkg -si 2>&1 | tee "$log_file"
+        LANG=C makepkg $makepkg_flags 2>&1 | tee "$log_file"
         local makepkg_status=$?
         set +o pipefail
 
@@ -358,6 +458,16 @@ install_repos() {
             fi
         else
             echo "Success: Installation completed."
+            
+            # Aggiorna la memoria in tempo reale con la versione appena compilata/installata
+            local real_pkg=$(basename "$url" .git)
+            local newly_installed=$(get_installed_pkg "$real_pkg")
+            if [[ -n "$newly_installed" ]]; then
+                local newly_ver=$(pacman -Q "$newly_installed" 2>/dev/null | awk '{print $2}')
+                if [[ -n "$newly_ver" ]]; then
+                    sed -i "s|^$alias_name $url.*|$alias_name $url $newly_ver|" "$CONFIG_FILE"
+                fi
+            fi
         fi
 
         echo "Cleaning cache for $alias_name..."
@@ -378,12 +488,10 @@ install_repos() {
 }
 
 check_updates() {
-    echo "Checking for updates (optimized)..."
-    local to_update=()
-    local has_updates=0
+    echo "Checking for updates and refreshing memory..."
     local pkgs=()
 
-    while read -r _ url; do
+    while read -r _ url _; do
         [[ -z "$url" ]] && continue
         pkgs+=("$(basename "$url" .git)")
     done < "$CONFIG_FILE"
@@ -395,46 +503,46 @@ check_updates() {
 
     local aur_json=$(curl -s "https://aur.archlinux.org/rpc/v5/info?$api_query")
     local remote_data=$(echo "$aur_json" | jq -r '.results[] | "\(.Name)|\(.Version)"')
+    
+    local temp_config=$(mktemp)
 
-    while read -r alias_name url; do
+    while read -r alias_name url old_latest; do
         [[ -z "$alias_name" ]] && continue
         
-        if [[ "$alias_name" == "aur-taw" && "$VERSION" == *"-dev"* ]]; then
-            echo "  [i] $alias_name ($VERSION) - Local dev build: update skipped."
-            continue
-        fi
-
         local real_pkgname=$(basename "$url" .git)
         local remote_ver=$(echo "$remote_data" | grep "^${real_pkgname}|" | cut -d'|' -f2)
 
         if [[ -z "$remote_ver" ]]; then
-            echo "  [!] $alias_name: Not found on AUR servers."; continue
+            echo "  [!] $alias_name: Not found on AUR servers."
+            echo "$alias_name $url Unknown" >> "$temp_config"
+            continue
+        fi
+
+        echo "$alias_name $url $remote_ver" >> "$temp_config"
+
+        if [[ "$alias_name" == "aur-taw" && "$VERSION" == *"-dev"* ]]; then
+            continue
         fi
 
         local installed_name=$(get_installed_pkg "$real_pkgname")
         
         if [[ -z "$installed_name" ]]; then
-            echo "  [?] $alias_name: Currently not installed."; continue
+            continue
         fi
 
         local installed_ver=$(pacman -Q "$installed_name" 2>/dev/null | awk '{print $2}')
 
         if [[ $(vercmp "$installed_ver" "$remote_ver") -lt 0 ]]; then
-            echo "$alias_name ($installed_name): Update available ($installed_ver -> $remote_ver)"
-            to_update+=("$alias_name")
-            has_updates=1
-        else
-            echo "$alias_name: Up to date ($installed_ver)"
+            echo "  [UPDATE] $alias_name: $installed_ver -> $remote_ver"
         fi
     done < "$CONFIG_FILE"
 
+    mv "$temp_config" "$CONFIG_FILE"
+
     echo ""
-    if [[ $has_updates -eq 1 ]]; then
-        read -p "Do you want to install updates now? [y/N] " resp
-        if [[ "$resp" == "y" || "$resp" == "Y" ]]; then install_repos "${to_update[@]}"; fi
-    else
-        echo "All your software is up to date!"
-    fi
+    echo "Check completed. Memory updated."
+    echo "Run 'aur-taw list' to see current statuses,"
+    echo "or 'aur-taw install --all --upgrade' to apply available updates."
 }
 
 import_repos() {
@@ -476,14 +584,18 @@ import_repos() {
             continue
         fi
         
+        # Pesca la versione già installata da usare come valore iniziale per LATEST AUR
+        local installed_ver=$(pacman -Q "$pkg" 2>/dev/null | awk '{print $2}')
+        [[ -z "$installed_ver" ]] && installed_ver="Unknown"
+        
         if [[ $import_all -eq 1 ]]; then
-            echo "$pkg https://aur.archlinux.org/$pkg.git" >> "$CONFIG_FILE"
+            echo "$pkg https://aur.archlinux.org/$pkg.git $installed_ver" >> "$CONFIG_FILE"
             echo "  -> Auto-added to memory: $pkg"
             ((added_count++))
         else
             read -p "Do you want to track '$pkg' in aur-taw? [y/N] " resp
             if [[ "$resp" == "y" || "$resp" == "Y" ]]; then
-                echo "$pkg https://aur.archlinux.org/$pkg.git" >> "$CONFIG_FILE"
+                echo "$pkg https://aur.archlinux.org/$pkg.git $installed_ver" >> "$CONFIG_FILE"
                 echo "  -> Added to memory: $pkg"
                 ((added_count++))
             fi
@@ -509,7 +621,15 @@ main() {
     touch "$CONFIG_FILE"
 
     if [[ $is_first_run -eq 1 ]]; then
-        echo "aur-taw https://aur.archlinux.org/aur-taw.git" >> "$CONFIG_FILE"
+        local initial_taw_ver="Unknown"
+        if pacman -Qq aur-taw >/dev/null 2>&1; then
+            initial_taw_ver=$(pacman -Q aur-taw 2>/dev/null | awk '{print $2}')
+        fi
+        echo "aur-taw https://aur.archlinux.org/aur-taw.git $initial_taw_ver" >> "$CONFIG_FILE"
+    fi
+
+    if [[ $is_first_run -eq 0 ]] && grep -qE '^[^ ]+ [^ ]+$' "$CONFIG_FILE"; then
+        sed -i 's/$/ Unknown/' "$CONFIG_FILE"
     fi
 
     case "$1" in
