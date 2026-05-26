@@ -1,6 +1,6 @@
 #!/bin/bash
 
-VERSION="v1.2.0"
+VERSION="1.2.0"
 
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/aur-taw"
 CONFIG_FILE="$CONFIG_DIR/repos.txt"
@@ -165,7 +165,7 @@ uninstall_pkg() {
     fi
 
     echo "Uninstalling '$installed_name' (and orphaned dependencies)..."
-    sudo pacman -Rns --noconfirm "$installed_name"
+    sudo pacman -Rns "$installed_name"
     
     if ! pacman -Qq "$installed_name" >/dev/null 2>&1; then
         echo "Uninstallation completed."
@@ -341,7 +341,8 @@ install_repos() {
         local log_file="$temp_dir/makepkg.log"
 
         set -o pipefail
-        LANG=C makepkg -si --noconfirm 2>&1 | tee "$log_file"
+        # RIMOSSO --noconfirm da makepkg: ora Pacman chiederà conferma per l'installazione
+        LANG=C makepkg -si 2>&1 | tee "$log_file"
         local makepkg_status=$?
         set +o pipefail
 
