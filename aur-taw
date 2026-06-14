@@ -84,7 +84,6 @@ add_repo() {
 
     sed -i "/^$name /d" "$CONFIG_FILE"
     
-    # Cerca di capire se il pacchetto che stiamo aggiungendo è già installato
     local real_pkgname=$(basename "$url" .git)
     local installed_name=$(get_installed_pkg "$real_pkgname")
     local initial_ver="Unknown"
@@ -328,7 +327,6 @@ install_repos() {
         local commit=""
         if [[ "$item" == *"@"* ]]; then commit="${item#*@}"; fi
 
-        # Filtro per la Dev Build: BLOCCA SUBITO aur-taw PRIMA dei prompt
         if [[ "$alias_name" == "aur-taw" && "$VERSION" == *"-dev"* ]]; then
             echo "  [!] $alias_name: Skipped (Running dev build $VERSION)."
             continue
@@ -342,14 +340,10 @@ install_repos() {
         local real_pkgname=$(basename "$url" .git)
         local installed_name=$(get_installed_pkg "$real_pkgname")
         
-        # Filtro intelligenza installazione
         if [[ -n "$installed_name" ]]; then
-            # Se è già installato
             if [[ -n "$commit" ]]; then
-                # L'utente ha chiesto un commit specifico (downgrade/checkout), procedi.
                 filtered_repos+=("$item")
             elif [[ $is_upgrade -eq 1 ]]; then
-                # L'utente ha chiesto l'upgrade, controlliamo la versione
                 if [[ "$latest_ver" == "Unknown" || -z "$latest_ver" ]]; then
                     echo "  [?] $alias_name: Unknown remote version. Run 'aur-taw check' first."
                     continue
@@ -362,11 +356,9 @@ install_repos() {
                     echo "  [i] $alias_name: Already up to date ($installed_ver)."
                 fi
             else
-                # È già installato, nessun commit specifico e nessun --upgrade richiesto. Salta.
                 echo "  [i] $alias_name: Already installed. (Pass --upgrade to update it)"
             fi
         else
-            # Non è installato, deve essere installato per forza
             filtered_repos+=("$item")
         fi
     done
@@ -580,7 +572,9 @@ import_repos() {
     
     local added_count=0
     for pkg in "${valid_aur_pkgs[@]}"; do
-        if grep -q "^$pkg " "$CONFIG_FILE"; then
+        local url="https://aur.archlinux.org/$pkg.git"
+        
+        if awk '{print $2}' "$CONFIG_FILE" | grep -Fq "$url"; then
             continue
         fi
         
@@ -589,13 +583,13 @@ import_repos() {
         [[ -z "$installed_ver" ]] && installed_ver="Unknown"
         
         if [[ $import_all -eq 1 ]]; then
-            echo "$pkg https://aur.archlinux.org/$pkg.git $installed_ver" >> "$CONFIG_FILE"
+            echo "$pkg $url $installed_ver" >> "$CONFIG_FILE"
             echo "  -> Auto-added to memory: $pkg"
             ((added_count++))
         else
             read -p "Do you want to track '$pkg' in aur-taw? [y/N] " resp
             if [[ "$resp" == "y" || "$resp" == "Y" ]]; then
-                echo "$pkg https://aur.archlinux.org/$pkg.git $installed_ver" >> "$CONFIG_FILE"
+                echo "$pkg $url $installed_ver" >> "$CONFIG_FILE"
                 echo "  -> Added to memory: $pkg"
                 ((added_count++))
             fi
