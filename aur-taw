@@ -218,7 +218,7 @@ list_repos() {
         fi
 
         if [[ "$alias_name" == "aur-taw" && "$VERSION" == *"-dev"* ]]; then
-            output+="${alias_name}|aur-taw|${VERSION} (Dev Build)|${latest_ver}|${url}\n"
+            output+="${alias_name}|aur-taw|${VERSION} (Dev Build)|${VERSION} (Dev Build)|${url}\n"
             continue
         fi
 
@@ -451,7 +451,6 @@ install_repos() {
         else
             echo "Success: Installation completed."
             
-            # Aggiorna la memoria in tempo reale con la versione appena compilata/installata
             local real_pkg=$(basename "$url" .git)
             local newly_installed=$(get_installed_pkg "$real_pkg")
             if [[ -n "$newly_installed" ]]; then
@@ -578,7 +577,6 @@ import_repos() {
             continue
         fi
         
-        # Pesca la versione già installata da usare come valore iniziale per LATEST AUR
         local installed_ver=$(pacman -Q "$pkg" 2>/dev/null | awk '{print $2}')
         [[ -z "$installed_ver" ]] && installed_ver="Unknown"
         
