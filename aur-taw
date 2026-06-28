@@ -1,21 +1,21 @@
 #!/bin/bash
 
 VERSION="1.2.0"
-SYSTEM_LIB_DIR="./lib"
 
-if [[ "$SYSTEM_LIB_DIR" == "./lib" ]]; then
-    SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+SCRIPT_PATH="$(readlink -f "$0")"
+SCRIPT_DIR="$(dirname "$SCRIPT_PATH")"
+
+if [[ -f "$SCRIPT_DIR/lib/core.bash" ]]; then
     LIB_DIR="$SCRIPT_DIR/lib"
+elif [[ -f "$(dirname "$SCRIPT_DIR")/share/aur-taw/lib/core.bash" ]]; then
+    LIB_DIR="$(dirname "$SCRIPT_DIR")/share/aur-taw/lib"
 else
-    LIB_DIR="$SYSTEM_LIB_DIR"
-fi
-
-if [[ -f "$LIB_DIR/core.bash" ]]; then
-    source "$LIB_DIR/core.bash"
-else
-    echo "Fatal Error: Missing core module at $LIB_DIR/core.bash"
+    echo "Fatal Error: Could not find module directory."
+    echo "Searched in: $SCRIPT_DIR/lib AND $(dirname "$SCRIPT_DIR")/share/aur-taw/lib"
     exit 1
 fi
+
+source "$LIB_DIR/core.bash"
 
 for module in "$LIB_DIR"/*.bash; do
     [[ "$module" == *"/core.bash" ]] && continue
