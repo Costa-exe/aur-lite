@@ -54,9 +54,26 @@ search_aur() {
 }
 
 add_repo() {
+    if [[ $# -ne 2 ]]; then
+        echo "Error: Invalid number of parameters."
+        echo "Usage: aur-taw add <alias> <url>"
+        echo "Note: The alias cannot contain spaces. Use hyphens instead (e.g., my-package)."
+        exit 1
+    fi
+
     local name="$1"
     local url="$2"
-    if [[ -z "$name" || -z "$url" ]]; then echo "Error: Provide alias and URL."; exit 1; fi
+
+    if [[ "$name" =~ [[:space:]] ]]; then
+        echo "Error: The alias '$name' contains spaces."
+        echo "Please use a single word without spaces (e.g., my-package)."
+        exit 1
+    fi
+
+    if [[ ! "$url" =~ ^https?:// ]]; then
+        echo "Error: The URL provided does not seem valid. It must start with http:// or https://"
+        exit 1
+    fi
 
     local existing_alias
     existing_alias=$(awk -v u="$url" '$2==u {print $1}' "$CONFIG_FILE")
