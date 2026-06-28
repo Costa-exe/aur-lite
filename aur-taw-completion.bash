@@ -17,7 +17,11 @@ _aur_taw_completions() {
     fi
 
     case "${prev}" in
-        install|remove|uninstall|view|log)
+        install)
+            COMPREPLY=( $(compgen -W "--all --upgrade ${repos}" -- "${cur}") )
+            return 0
+            ;;
+        remove|uninstall|view|log)
             COMPREPLY=( $(compgen -W "${repos}" -- "${cur}") )
             return 0
             ;;

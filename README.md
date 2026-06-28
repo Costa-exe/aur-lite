@@ -2,7 +2,7 @@
 
 A minimalist, opt-in, and RAM-safe AUR (Arch User Repository) helper written entirely in pure Bash. 
 
-Unlike traditional AUR helpers that take over your entire system and blindly scan for foreign packages, `aur-taw` is designed for purists. It uses a local text file to track **only the packages you explicitly tell it to track**, giving you absolute control over your system.
+Unlike traditional AUR helpers that take over your entire system and blindly scan for foreign packages, `aur-taw` is designed for purists. It uses a local flat-file database to track **only the packages you explicitly tell it to track**, giving you absolute control over your system.
 
 ## Table of Contents
 * [Key Features & Security Measures](#key-features--security-measures)
@@ -16,7 +16,7 @@ Unlike traditional AUR helpers that take over your entire system and blindly sca
   * [Add / Update](#add--update)
   * [Import (Already Installed)](#import-already-installed)
   * [List](#list)
-  * [Install](#install)
+  * [Install & Upgrade](#install--upgrade)
   * [Check Updates](#check-updates)
   * [View PKGBUILD](#view-pkgbuild)
   * [Log (Git History)](#log-git-history)
@@ -27,17 +27,20 @@ Unlike traditional AUR helpers that take over your entire system and blindly sca
 
 ## Key Features & Security Measures
 
-* **KISS Compliant**: No Go, no Rust, no background magic. Just standard Bash.
+* **KISS Compliant & Modular**: No Go, no Rust, no background magic. Just standard Bash cleanly divided into modular libraries (`lib/`) for maximum maintainability.
+* **Smart Build Engine**: Acts like `pacman -S --needed`. It intelligently skips compiling packages that are already installed and up-to-date, saving you immense amounts of time.
 * **RAM-Safe Builds**: Large AUR packages (like browsers or electron apps) can easily crash your system if compiled in `tmpfs` (RAM). `aur-taw` clones and builds everything on your physical disk (`~/.cache/aur-taw`), keeping your memory free and your system stable.
 * **Self-Updating**: `aur-taw` automatically tracks itself upon first run, allowing it to update itself through the standard update checking process.
+* **Offline-Ready List**: The `list` command instantly displays your installed versions alongside the latest known AUR versions directly from local memory, without hanging on slow network requests.
 * **Smart Import**: Easily migrate from other helpers by scanning your system for installed AUR packages and interactively choosing which ones to track.
-* **Smart Safeguards**:
+* **Strict Safeguards**:
+  * **Input Validation**: Rejects invalid URLs and spaces in aliases to protect database integrity.
   * **Pacman Lock Check**: Verifies `/var/lib/pacman/db.lck` before starting any operation.
   * **Removal Blocker**: Prevents you from untracking an alias using `remove` if the software is still physically installed on your system. It also strictly protects the `aur-taw` alias from accidental removal.
   * **VCS/Bin Alerts**: Warns you if you attempt to downgrade a non-standard package where specific commits might be ignored or missing.
 * **Time Machine (Downgrades)**: Easily install a specific version of a package by appending a git commit hash.
 * **Clean Workflow**: Automatically detects missing AUR dependencies, provides links to add them, and prompts you to remove build orphans once the installation is done.
-* **Bash Autocompletion**: Full `TAB` completion support for both commands and your custom package aliases.
+* **Bash Autocompletion**: Full `TAB` completion support for commands, tracking aliases, and mass-processing flags.
 
 ## Dependencies
 
@@ -106,6 +109,7 @@ Search for a package by its exact name on the AUR.
 
 ### Add / Update
 Add a repository to your tracking list using a custom alias. If the alias already exists, it updates the URL.
+*Note: The alias must be a single word without spaces (e.g., `music-player`). The URL must be a valid `http://` or `https://` git link.*
 
     aur-taw add <alias> <git-url>
     # Example: aur-taw add music-player https://aur.archlinux.org/spotify.git
@@ -120,48 +124,57 @@ If you want to skip the prompts and instantly add all valid installed AUR packag
     aur-taw import --all
 
 ### List
-Show a beautifully formatted table of all tracked aliases, their real package names, installed versions, and repository links.
+Show a beautifully formatted table of all tracked aliases, their real package names, installed versions, the latest known AUR versions, and repository links.
 
     aur-taw list
 
 **Example Output:**
 
     Saved repositories:
+      (Run 'aur-taw check' to refresh the LATEST AUR column)
 
-    ALIAS         REAL NAME  INSTALLED VERSION  REPO LINK
-    -----         ---------  -----------------  ---------
-    aur-taw       aur-taw    1.0.0-1            https://aur.archlinux.org/aur-taw.git
-    music-player  spotify    1.2.37.701-1       https://aur.archlinux.org/spotify.git
-    my-bonsai     cbonsai    Not-installed      https://aur.archlinux.org/cbonsai-git.git
+    ALIAS         REAL NAME  INSTALLED VERSION  LATEST AUR    REPO LINK
+    -----         ---------  -----------------  ----------    ---------
+    aur-taw       aur-taw    1.2.0              1.2.0         https://aur.archlinux.org/aur-taw.git
+    music-player  spotify    1.2.37.701-1       1.2.40.100-1  https://aur.archlinux.org/spotify.git
+    my-bonsai     cbonsai    Not-installed      Unknown       https://aur.archlinux.org/cbonsai-git.git
 
 
-### Install
-Clone, compile, and install packages. You can specify one or multiple aliases. If no alias is provided, it processes **all** tracked packages.
+### Install & Upgrade
+Clone, compile, and install packages. `aur-taw` is smart: if you ask it to install a package that is already installed, it will automatically skip it to save time, unless you explicitly request an upgrade.
 
-    # Install a specific tracked package
+    # Install a specific tracked package (Skips if already installed)
     aur-taw install music-player
 
-    # Install all tracked packages
-    aur-taw install
+    # Upgrade a specific package (Only builds if a newer version is available)
+    aur-taw install music-player --upgrade
 
-    # Install a specific older version (Downgrade) using a Git commit hash
+    # Mass process ALL tracked packages (Builds only missing ones)
+    aur-taw install --all
+
+    # Mass UPGRADE all tracked packages (The equivalent of a full AUR system update)
+    aur-taw install --all --upgrade
+
+    # Time Machine: Install a specific older version using a Git commit hash
     aur-taw install music-player@a1b2c3d
+
+*(Note: Mass commands using `--all` will trigger a single safety prompt before proceeding completely unattended via `--noconfirm`).*
 
 **Note on Downgrades:** Installing via specific commit (`@hash`) works flawlessly for **standard packages**. However, for VCS packages (`-git`, `-svn`) `makepkg` will ignore the commit and pull the latest source code anyway. For binary packages (`-bin`), the build will fail if the author deleted the old binary from their server. The script will throw an alert if you attempt to downgrade a non-standard package.
 
 ### Check Updates
-Perform a blazing-fast bulk API call to check if any of your tracked packages have updates available on the AUR. It will prompt you to install them automatically.
+Perform a blazing-fast bulk API call to check for updates on the AUR. This command updates your local memory database silently, populating the `LATEST AUR` column for your `list` command.
 
     aur-taw check
 
 **Example Output:**
 
-    Checking for updates (optimized)...
-      aur-taw: Up to date (1.0.0-1)
-      music-player: Up to date (1.2.37.701-1)
-      my-bonsai (cbonsai): Update available (Not-installed -> 1.4.2-1)
+    Checking for updates and refreshing memory...
+      [UPDATE] music-player: 1.2.37.701-1 -> 1.2.40.100-1
 
-    Do you want to install updates now? [y/N]
+    Check completed. Memory updated.
+    Run 'aur-taw list' to see current statuses,
+    or 'aur-taw install --all --upgrade' to apply available updates.
 
 
 ### View PKGBUILD
